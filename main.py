@@ -10,9 +10,10 @@ import sharc
 
 
 class Sharc:
-    header = None
-    progList = None
-    codeList = None
+    def __init__(self):
+        self.header = sharc.header = sharc.Header()
+        self.progList = sharc.List()
+        self.codeList = sharc.List()
 
     def set(self, progList, codeList, header):
         self.header = header
@@ -251,9 +252,7 @@ class MainWindow(QtWidgets.QWidget):
         self.treeWidget.topLevelItem(0).setSelected(False)
         self.treeWidget.topLevelItem(1).setSelected(False)
 
-        self.sharc.header = None
-        self.sharc.progList = None
-        self.sharc.codeList = None
+        self.sharc = Sharc()
         self.numPrograms = 0
         self.codeFiles = []
 
@@ -428,9 +427,6 @@ class MainWindow(QtWidgets.QWidget):
             with open(file, encoding='utf-8') as inf:
                 code.code = inf.read()
 
-            if not self.sharc.codeList:
-                self.sharc.codeList = sharc.List()
-
             self.sharc.codeList.append(code)
 
             source = ShaderSource()
@@ -599,9 +595,13 @@ class MainWindow(QtWidgets.QWidget):
             self.sharc.progList.append(program)
 
     def saveFile(self):
+        file = self.fileLineEdit.text()
+        if not file:
+            return self.saveFileAs()
+
         self.save()
 
-        with open(self.fileLineEdit.text(), "wb") as out:
+        with open(file, "wb") as out:
             out.write(sharc.save(self.sharc.progList, self.sharc.codeList))
 
     def saveFileAs(self):
