@@ -11,7 +11,7 @@ supported_versions = 10, 11
 
 class Header:
     def __init__(self, endianness='<'):
-        self.format = '3I4xI'
+        self.format = '5I'
         self.endianness = endianness
 
         self.magic = 0x53484141  # SHAA
@@ -23,9 +23,10 @@ class Header:
         (self.magic,
          self.version,
          self.fileSize,
+         endianness,
          nameLen) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
 
-        assert self.magic == 0x53484141
+        assert self.magic == 0x53484141 and endianness == 1
 
         size = struct.calcsize(self.format)
         pos += size
@@ -44,6 +45,7 @@ class Header:
                 self.magic,
                 self.version,
                 0,
+                1,
                 len(name),
             ),
             name,
