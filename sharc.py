@@ -6,7 +6,7 @@ import struct
 
 
 header = None
-supported_versions = 10, 11
+supported_versions = 10, 11, 12
 
 
 class Header:
@@ -53,51 +53,68 @@ class Header:
 
 
 class ShaderProgramBase:
-    class VariationMacro:
+    class ShaderVariation:
+        class Variable:
+            def __init__(self, name=''):
+                self.name = name
+                self.validValues = []
+
         def __init__(self, endianness='<'):
             self.format = '4I'
             self.endianness = endianness
 
             self.size = 0
-            self.data = b''
+
+            self.name = ''
+            self.variable = ShaderProgramBase.ShaderVariation.Variable()
 
         def __str__(self):
-            return 'Variation Macro'
+            return 'Shader Variation Macro'
+
+        def getName(self):
+            return repr((self.name, self.variable.name))
 
         def load(self, data, pos):
             (self.size,
-             _4,
-             _8,
-             _C) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+             nameLen,
+             validValueCount,
+             variableNameLen) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
 
-            assert self.size == 8  # Structure is incomplete
-            self.data = data[pos:pos + self.size]
+            assert self.size >= struct.calcsize(self.format)
 
-        def save(self):
-            return self.data
+            pos += struct.calcsize(self.format)
+            self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
 
-    class VariationSymbol:
-        def __init__(self, endianness='<'):
-            self.format = '4I'
-            self.endianness = endianness
+            pos += nameLen
+            validValues = []
+            for _ in range(validValueCount):
+                valueEnd = data.find(b'\0', pos) + 1; assert valueEnd != -1
+                validValues.append(data[pos:valueEnd].decode('utf-8').rstrip('\0'))
+                pos = valueEnd
 
-            self.size = 0
-            self.data = b''
+            self.variable.name = data[pos:pos + variableNameLen].decode('utf-8').rstrip('\0')
+            self.variable.validValues = validValues
 
-        def __str__(self):
-            return 'Variation Symbol'
-
-        def load(self, data, pos):
-            (self.size,
-             _4,
-             _8,
-             _C) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
-
-            assert self.size == 8  # Structure is incomplete
-            self.data = data[pos:pos + self.size]
+            if self.name == 'NUM_SKINNING_VTX':
+                self.variable.validValues = [str(int(value) + 1) for value in self.variable.validValues]
 
         def save(self):
-            return self.data
+            name = self.name.encode('utf-8') + b'\0'
+            validValues = b''.join([value.encode('utf-8') + b'\0' for value in self.variable.validValues])
+            variableName = self.variable.name.encode('utf-8') + b'\0'
+
+            return b''.join([
+                struct.pack(
+                    '%s%s' % (self.endianness, self.format),
+                    struct.calcsize(self.format) + len(name) + len(validValues) + len(variableName),
+                    len(name),
+                    len(self.variable.validValues),
+                    len(variableName),
+                ),
+                name,
+                validValues,
+                variableName,
+            ])
 
     class ShaderSymbol:
         class Variable:
@@ -119,6 +136,9 @@ class ShaderProgramBase:
         def __str__(self):
             return 'Shader symbol'
 
+        def getName(self):
+            return repr((self.name, self.variable.name))
+
         def load(self, data, pos):
             (self.size,
              self.variable.offset,
@@ -126,6 +146,8 @@ class ShaderProgramBase:
              variableNameLen,
              defaultValueLen,
              variationCount) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+
+            assert self.size >= struct.calcsize(self.format)
 
             pos += struct.calcsize(self.format)
             self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
@@ -156,7 +178,7 @@ class ShaderProgramBase:
                 name,
                 variableName,
                 self.variable.default,
-                bytes(map(int, self.variationFlags))
+                bytes(map(int, self.variationFlags)),
             ])
 
 
@@ -245,12 +267,18 @@ class ShaderProgram:
         self.geometryMacros.load(data, pos, ShaderProgram.ShaderMacro)
 
         pos += self.geometryMacros.size
-        self.variations.load(data, pos, ShaderProgramBase.VariationMacro)
+        self.variations.load(data, pos, ShaderProgramBase.ShaderVariation)
 
         pos += self.variations.size
-        if header.version == 11:
-            self.variationSymbols.load(data, pos, ShaderProgramBase.VariationSymbol)
+        if header.version >= 11:
+            self.variationSymbols.load(data, pos, ShaderProgramBase.ShaderVariation)
             pos += self.variationSymbols.size
+
+        if header.version == 12:
+            ShaderUniformBlockCount = struct.unpack_from('%sI' % self.endianness, data, pos + 4)[0]
+            if ShaderUniformBlockCount > 0:
+                print(self.name, ShaderUniformBlockCount)
+            pos += struct.unpack_from('%sI' % self.endianness, data, pos)[0]  # Skip ShaderUniformBlock
 
         self.uniformVariables.load(data, pos, ShaderProgramBase.ShaderSymbol)
 
@@ -275,7 +303,7 @@ class ShaderProgram:
         samplerVariables = self.samplerVariables.save()
         attribVariables = self.attribVariables.save()
 
-        if header.version == 11:
+        if header.version >= 11:
             variationSymbols = self.variationSymbols.save()
 
         else:
@@ -324,7 +352,10 @@ class ShaderCode:
         pos += struct.calcsize(self.format)
         self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
 
-        pos += nameLen; assert codeLen == codeLen2
+        if codeLen2 != codeLen:
+            print(self.name, codeLen, codeLen2)
+
+        pos += nameLen
         self.code = data[pos:pos + codeLen].decode('shift-jis')
 
     def save(self):
