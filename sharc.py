@@ -6,7 +6,6 @@ import struct
 
 
 header = None
-supported_versions = 10, 11
 
 
 class Header:
@@ -14,19 +13,17 @@ class Header:
         self.format = '5I'
         self.endianness = endianness
 
-        self.magic = 0x53484141  # SHAA
-        self.version = 11
-        self.fileSize = 0
         self.name = ''
+        self.size = 0
 
     def load(self, data, pos=0):
-        (self.magic,
-         self.version,
-         self.fileSize,
+        (magic,
+         version,
+         fileSize,
          endianness,
          nameLen) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
 
-        assert self.magic == 0x53484141 and endianness == 1
+        assert magic == 0x53484141 and endianness == 1 and version == 11
 
         size = struct.calcsize(self.format)
         pos += size
@@ -34,176 +31,224 @@ class Header:
         self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
         self.size = size + nameLen
 
-        assert self.version in supported_versions
-
     def save(self):
-        name = self.name.encode('utf-8') + b'\0'
+        name = (self.name + '\0').encode('utf-8')
+        nameLen = len(name)
+
+        self.size = struct.calcsize(self.format) + nameLen
 
         return b''.join([
             struct.pack(
                 '%s%s' % (self.endianness, self.format),
-                self.magic,
-                self.version,
+                0x53484141,  # SHAA
+                11,
                 0,
                 1,
-                len(name),
+                nameLen,
             ),
             name,
         ])
 
 
-class ShaderProgramBase:
-    class VariationMacro:
-        def __init__(self, endianness='<'):
-            self.format = '4I'
-            self.endianness = endianness
+class ShaderVariation:
+    def __init__(self, endianness='<'):
+        self.format = '2IiI'
+        self.endianness = endianness
 
-            self.size = 0
-            self.data = b''
+        self.size = 0
 
-        def __str__(self):
-            return 'Variation Macro'
+        self.name = ''
+        self.values = []
+        self.ID = ''
 
-        def load(self, data, pos):
-            (self.size,
-             _4,
-             _8,
-             _C) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+    def __str__(self):
+        return 'Shader Variation Macro'
 
-            assert self.size == 8  # Structure is incomplete
-            self.data = data[pos:pos + self.size]
+    def getName(self):
+        return repr((self.name, self.ID))
 
-        def save(self):
-            return self.data
+    def load(self, data, pos):
+        (self.size,
+         nameLen,
+         valueCount,
+         idLen) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+        assert self.size >= struct.calcsize(self.format)
+        pos += struct.calcsize(self.format)
 
-    class VariationSymbol:
-        def __init__(self, endianness='<'):
-            self.format = '4I'
-            self.endianness = endianness
+        self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
+        pos += nameLen
 
-            self.size = 0
-            self.data = b''
+        self.values.clear()
+        for _ in range(valueCount):
+            while data[pos] == 0:
+                pos += 1
 
-        def __str__(self):
-            return 'Variation Symbol'
+            start_pos = pos
+            pos += 1
 
-        def load(self, data, pos):
-            (self.size,
-             _4,
-             _8,
-             _C) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+            while data[pos] != 0:
+                pos += 1
 
-            assert self.size == 8  # Structure is incomplete
-            self.data = data[pos:pos + self.size]
+            pos += 1
 
-        def save(self):
-            return self.data
+            self.values.append(data[start_pos:pos].decode('utf-8').rstrip('\0'))
 
-    class ShaderSymbol:
-        class Variable:
-            def __init__(self, name='', default=b'', offset=-1):
-                self.name = name
-                self.default = default
-                self.offset = offset
+        self.ID = data[pos:pos + idLen].decode('utf-8').rstrip('\0')
 
-        def __init__(self, endianness='<'):
-            self.format = 'Ii4I'
-            self.endianness = endianness
+    def save(self):
+        for value in self.values:
+            assert value
 
-            self.size = 0
+        name = (self.name + '\0').encode('utf-8')
+        values = b''.join([(value + '\0').encode('utf-8') for value in self.values])
+        ID = (self.ID + '\0').encode('utf-8')
 
-            self.name = ''
-            self.variable = ShaderProgramBase.ShaderSymbol.Variable()
-            self.variationFlags = []
+        nameLen = len(name)
+        idLen = len(ID)
 
-        def __str__(self):
-            return 'Shader symbol'
+        self.size = struct.calcsize(self.format) + nameLen + len(values) + idLen
 
-        def load(self, data, pos):
-            (self.size,
-             self.variable.offset,
-             nameLen,
-             variableNameLen,
-             defaultValueLen,
-             variationCount) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+        return b''.join([
+            struct.pack(
+                '%s%s' % (self.endianness, self.format),
+                self.size,
+                nameLen,
+                len(self.values),
+                idLen,
+            ),
+            name,
+            values,
+            ID,
+        ])
 
-            pos += struct.calcsize(self.format)
-            self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
 
-            pos += nameLen
-            self.variable.name = data[pos:pos + variableNameLen].decode('utf-8').rstrip('\0')
+class ShaderSymbol:
+    def __init__(self, endianness='<'):
+        self.format = 'Ii4I'
+        self.endianness = endianness
 
-            pos += variableNameLen
-            self.variable.default = data[pos:pos + defaultValueLen]
+        self.size = 0
 
-            pos += defaultValueLen
-            self.variationFlags = list(map(bool, data[pos:pos + variationCount]))
+        self.param = 0
+        self.name = ''
+        self.ID = ''
+        self.defaultValue = b''
+        self.validVariations = []
 
-        def save(self):
-            name = self.name.encode('utf-8') + b'\0'
-            variableName = self.variable.name.encode('utf-8') + b'\0'
+    def __str__(self):
+        return 'Shader Symbol'
 
-            return b''.join([
-                struct.pack(
-                    '%s%s' % (self.endianness, self.format),
-                    struct.calcsize(self.format) + len(name) + len(variableName) + len(self.variable.default) + len(self.variationFlags),
-                    self.variable.offset,
-                    len(name),
-                    len(variableName),
-                    len(self.variable.default),
-                    len(self.variationFlags),
-                ),
-                name,
-                variableName,
-                self.variable.default,
-                bytes(map(int, self.variationFlags))
-            ])
+    def getName(self):
+        return repr((self.name, self.ID))
+
+    def load(self, data, pos):
+        (self.size,
+         self.param,
+         nameLen,
+         idLen,
+         defaultValueLen,
+         variationCount) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+        assert self.size >= struct.calcsize(self.format)
+        pos += struct.calcsize(self.format)
+
+        self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
+        pos += nameLen
+
+        self.ID = data[pos:pos + idLen].decode('utf-8').rstrip('\0')
+        pos += idLen
+
+        self.defaultValue = data[pos:pos + defaultValueLen]
+        pos += defaultValueLen
+
+        self.validVariations = list(map(bool, data[pos:pos + variationCount]))
+
+    def save(self):
+        name = (self.name + '\0').encode('utf-8')
+        ID = (self.ID + '\0').encode('utf-8')
+
+        nameLen = len(name)
+        idLen = len(ID)
+        defaultValueLen = len(self.defaultValue)
+        variationCount = len(self.validVariations)
+
+        self.size = struct.calcsize(self.format) + nameLen + idLen + defaultValueLen + variationCount
+
+        return b''.join([
+            struct.pack(
+                '%s%s' % (self.endianness, self.format),
+                self.size,
+                self.param,
+                nameLen,
+                idLen,
+                defaultValueLen,
+                variationCount,
+            ),
+            name,
+            ID,
+            self.defaultValue,
+            bytes(map(int, self.validVariations)),
+        ])
+
+
+class ShaderMacro:
+    def __init__(self, endianness='<'):
+        self.format = '3I'
+        self.endianness = endianness
+
+        self.size = 0
+
+        self.name = ''
+        self.value = ''
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.name == other
+
+        return super().__eq__(other)
+
+    def __str__(self):
+        return 'Shader Macro'
+
+    def load(self, data, pos):
+        (self.size,
+         nameLen,
+         valueLen) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+        pos += struct.calcsize(self.format)
+
+        self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
+        pos += nameLen
+
+        self.value = data[pos:pos + valueLen].decode('utf-8').rstrip('\0')
+
+    def save(self):
+        name = (self.name + '\0').encode('utf-8')
+        value = (self.value + '\0').encode('utf-8')
+
+        nameLen = len(name)
+        valueLen = len(value)
+
+        self.size = struct.calcsize(self.format) + nameLen + valueLen
+
+        return b''.join([
+            struct.pack(
+                '%s%s' % (self.endianness, self.format),
+                self.size,
+                nameLen,
+                valueLen,
+            ),
+            name,
+            value,
+        ])
 
 
 class ShaderProgram:
-    class ShaderMacro:
-        def __init__(self, endianness='<'):
-            self.format = '3I'
-            self.endianness = endianness
-
-            self.size = 0
-            self.name = ''
-            self.value = ''
-
-        def __str__(self):
-            return 'Shader Macro'
-
-        def load(self, data, pos):
-            (self.size,
-             nameLen,
-             valueLen) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
-
-            pos += struct.calcsize(self.format)
-            self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
-
-            pos += nameLen
-            self.value = data[pos:pos + valueLen].decode('utf-8').rstrip('\0')
-
-        def save(self):
-            name = self.name.encode('utf-8') + b'\0'
-            value = self.value.encode('utf-8') + b'\0'
-
-            return b''.join([
-                struct.pack(
-                    '%s%s' % (self.endianness, self.format),
-                    struct.calcsize(self.format) + len(name) + len(value),
-                    len(name),
-                    len(value),
-                ),
-                name,
-                value,
-            ])
-
     def __init__(self, endianness='<'):
         self.format = '2I3i'
         self.endianness = endianness
 
         self.size = 0
+
+        self.name = ''
         self.vtxShIdx = -1
         self.frgShIdx = -1
         self.geoShIdx = -1
@@ -213,14 +258,18 @@ class ShaderProgram:
         self.geometryMacros = List(self.endianness)
 
         self.variations = List(self.endianness)
-        self.variationSymbols = List(self.endianness)
+        self.variationDefaults = List(self.endianness)
 
         self.uniformVariables = List(self.endianness)
         self.uniformBlocks = List(self.endianness)
         self.samplerVariables = List(self.endianness)
         self.attribVariables = List(self.endianness)
 
-        self.name = ''
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.name == other
+
+        return super().__eq__(other)
 
     def __str__(self):
         return 'Shader Program'
@@ -231,61 +280,114 @@ class ShaderProgram:
          self.vtxShIdx,
          self.frgShIdx,
          self.geoShIdx) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
-
         pos += struct.calcsize(self.format)
+
         self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
-
         pos += nameLen
-        self.vertexMacros.load(data, pos, ShaderProgram.ShaderMacro)
 
+        self.vertexMacros.load(data, pos, ShaderMacro)
         pos += self.vertexMacros.size
-        self.fragmentMacros.load(data, pos, ShaderProgram.ShaderMacro)
 
+        self.fragmentMacros.load(data, pos, ShaderMacro)
         pos += self.fragmentMacros.size
-        self.geometryMacros.load(data, pos, ShaderProgram.ShaderMacro)
 
+        self.geometryMacros.load(data, pos, ShaderMacro)
         pos += self.geometryMacros.size
-        self.variations.load(data, pos, ShaderProgramBase.VariationMacro)
 
+        self.variations.load(data, pos, ShaderVariation)
         pos += self.variations.size
-        if header.version == 11:
-            self.variationSymbols.load(data, pos, ShaderProgramBase.VariationSymbol)
-            pos += self.variationSymbols.size
 
-        self.uniformVariables.load(data, pos, ShaderProgramBase.ShaderSymbol)
+        self.variationDefaults.load(data, pos, ShaderVariation)
+        pos += self.variationDefaults.size
 
+        self.uniformVariables.load(data, pos, ShaderSymbol)
         pos += self.uniformVariables.size
-        self.uniformBlocks.load(data, pos, ShaderProgramBase.ShaderSymbol)
 
+        self.uniformBlocks.load(data, pos, ShaderSymbol)
         pos += self.uniformBlocks.size
-        self.samplerVariables.load(data, pos, ShaderProgramBase.ShaderSymbol)
 
+        self.samplerVariables.load(data, pos, ShaderSymbol)
         pos += self.samplerVariables.size
-        self.attribVariables.load(data, pos, ShaderProgramBase.ShaderSymbol)
+
+        self.attribVariables.load(data, pos, ShaderSymbol)
+        pos += self.attribVariables.size
+
+        for default in self.variationDefaults:
+            defaultName = default.getName()
+            for variation in self.variations:
+                if defaultName == variation.getName():
+                    assert len(default.values) <= 1
+
+                    break
+
+            else:
+                print("Variation default %s does not match any variation" % defaultName)
+
+        for variation in self.variations:
+            variationName = variation.getName()
+            for default in self.variationDefaults:
+                if variationName == default.getName():
+                    if variation.values and not default.values:
+                        print("Variation %s does not have a default (1)" % variationName)
+
+                    break
+
+            else:
+                if not variation.values:
+                    print("Variation %s does not have a default (2)" % variationName)
+
+                elif len(variation.values) == 1:
+                    print("Variation %s does not have a default (3)" % variationName)
+
+                else:
+                    print("Variation %s does not have a default (4)" % variationName)
+
+        for sym in self.uniformBlocks:
+            assert sym.param == len(sym.defaultValue)
+
+        for sym in self.samplerVariables:
+            assert not sym.defaultValue
+            assert sym.param == -1
+
+        for sym in self.attribVariables:
+            assert not sym.defaultValue
+            assert sym.param == -1
 
     def save(self):
-        name = self.name.encode('utf-8') + b'\0'
+        name = (self.name + '\0').encode('utf-8')
+        nameLen = len(name)
 
         vertexMacros = self.vertexMacros.save()
         fragmentMacros = self.fragmentMacros.save()
         geometryMacros = self.geometryMacros.save()
+
         variations = self.variations.save()
+        variationDefaults = self.variationDefaults.save()
+
         uniformVariables = self.uniformVariables.save()
         uniformBlocks = self.uniformBlocks.save()
         samplerVariables = self.samplerVariables.save()
         attribVariables = self.attribVariables.save()
 
-        if header.version == 11:
-            variationSymbols = self.variationSymbols.save()
-
-        else:
-            variationSymbols = b''
+        self.size = (
+            struct.calcsize(self.format) +
+            nameLen +
+            self.vertexMacros.size +
+            self.fragmentMacros.size +
+            self.geometryMacros.size +
+            self.variations.size +
+            self.variationDefaults.size +
+            self.uniformVariables.size +
+            self.uniformBlocks.size +
+            self.samplerVariables.size +
+            self.attribVariables.size
+        )
 
         return b''.join([
             struct.pack(
                 '%s%s' % (self.endianness, self.format),
-                struct.calcsize(self.format) + len(name) + len(vertexMacros) + len(fragmentMacros) + len(geometryMacros) + len(variations) + len(variationSymbols) + len(uniformVariables) + len(uniformBlocks) + len(samplerVariables) + len(attribVariables),
-                len(name),
+                self.size,
+                nameLen,
                 self.vtxShIdx,
                 self.frgShIdx,
                 self.geoShIdx,
@@ -295,7 +397,7 @@ class ShaderProgram:
             fragmentMacros,
             geometryMacros,
             variations,
-            variationSymbols,
+            variationDefaults,
             uniformVariables,
             uniformBlocks,
             samplerVariables,
@@ -303,41 +405,61 @@ class ShaderProgram:
         ])
 
 
-class ShaderCode:
+class ShaderSource:
     def __init__(self, endianness='<'):
         self.format = '4I'
         self.endianness = endianness
 
         self.size = 0
+
         self.name = ''
         self.code = ''
 
+        self._codeLen = 0
+        self._codeLen2 = 0
+
     def __str__(self):
         return 'Shader Code'
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.name == other
+
+        return super().__eq__(other)
 
     def load(self, data, pos):
         (self.size,
          nameLen,
          codeLen,
          codeLen2) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
-
         pos += struct.calcsize(self.format)
-        self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
 
-        pos += nameLen; assert codeLen == codeLen2
+        self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
+        pos += nameLen
+
         self.code = data[pos:pos + codeLen].decode('shift-jis')
+        pos += codeLen
+
+        self._codeLen = codeLen
+        self._codeLen2 = codeLen2
 
     def save(self):
-        name = self.name.encode('utf-8') + b'\0'
+        name = (self.name + '\0').encode('utf-8')
         code = self.code.encode('shift-jis')
+
+        nameLen = len(name)
+        codeLen = len(code)
+        codeLen2 = self._codeLen2 if codeLen == self._codeLen else codeLen
+
+        self.size = struct.calcsize(self.format) + nameLen + codeLen
 
         return b''.join([
             struct.pack(
                 '%s%s' % (self.endianness, self.format),
-                struct.calcsize(self.format) + len(name) + len(code),
-                len(name),
-                len(code),
-                len(code),
+                self.size,
+                nameLen,
+                codeLen,
+                codeLen2
             ),
             name,
             code,
@@ -348,20 +470,17 @@ class ShaderCode:
             out.write(self.code.encode('utf-8'))
 
 
-class ListBase:
+class List:
     def __init__(self, endianness='<'):
         self.format = '2I'
         self.endianness = endianness
 
         self.size = 0
-        self.count = 0
+
         self.items = []
 
     def __getitem__(self, i):
-        if not isinstance(i, int):
-            raise TypeError("index must be an integer")
-
-        return self.items[i]
+        return self.items.__getitem__(i)
 
     def append(self, item):
         self.items.append(item)
@@ -369,48 +488,41 @@ class ListBase:
     def extend(self, itemList):
         self.items.extend(itemList)
 
+    def index(self, item):
+        try:
+            return self.items.index(item)
+
+        except ValueError:
+            return -1
+
     def pop(self, index):
         return self.items.pop(index)
 
-    def len(self):
-        return len(self.items)
+    def __len__(self):
+        return self.items.__len__()
 
     def load(self, data, pos, ItemClass=None):
         (self.size,
-         self.count) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
-
+         count) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
         pos += struct.calcsize(self.format)
+
         if ItemClass:
-            for _ in range(self.count):
+            for _ in range(count):
                 item = ItemClass(self.endianness)
                 item.load(data, pos)
-
                 pos += item.size
+
                 self.append(item)
-
-
-class List(ListBase):
-    def index(self, item):
-        if isinstance(item, str):
-            for i, oItem in enumerate(self.items):
-                if isinstance(oItem, ShaderProgram.ShaderMacro) and oItem.name == item:
-                    return i
-
-        else:
-            for i, oItem in enumerate(self.items):
-                if item == oItem:
-                    return i
-
-        return -1
 
     def save(self):
         outBuffer = b''.join([item.save() for item in self])
+        self.size = struct.calcsize(self.format) + len(outBuffer)
 
         return b''.join([
             struct.pack(
                 '%s%s' % (self.endianness, self.format),
-                struct.calcsize(self.format) + len(outBuffer),
-                self.len(),
+                self.size,
+                len(self),
             ),
             outBuffer,
         ])
@@ -429,7 +541,7 @@ def load(inb, pos=0):
     pos += progList.size
 
     codeList = List()
-    codeList.load(inb, pos, ShaderCode)
+    codeList.load(inb, pos, ShaderSource)
 
     pos += codeList.size
 

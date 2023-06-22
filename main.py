@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os.path
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtGui, QtWidgets
 import sip
 
 from highlighter import Highlighter
@@ -49,7 +49,7 @@ class ShaderMacro(TableWidget):
 
 class ShaderSymbol(TableWidget):
     def __init__(self):
-        super().__init__(("Name", "Default Value", "Offset", "Shader Symbol"))
+        super().__init__(("Name", "ID", "Default Value", "Offset"))
 
 
 class TabWidget(QtWidgets.QWidget):
@@ -109,7 +109,7 @@ class ShaderSourceTab(QtWidgets.QWidget):
         fileLayout.addWidget(self._fileComboBox)
 
         self._editor = ShaderSource()
-        self._highlighter = Highlighter(self._editor.document())
+        Highlighter(self._editor.document())
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(fileLayout)
@@ -139,7 +139,7 @@ class ShaderSourceTab(QtWidgets.QWidget):
             self._editor.setPlainText(self._parent.sharc.codeList[index - 1].code)
 
 
-class ShaderModel(TabWidget):
+class ShaderProgram(TabWidget):
     def __init__(self, parent):
         super().__init__()
 
@@ -153,11 +153,11 @@ class ShaderModel(TabWidget):
         self.vertexCode = ShaderSourceTab(parent, 0)
         self.fragmentCode = ShaderSourceTab(parent, 1)
 
-        self.uniformBlocks.setColumnHidden(2, True)
-        self.samplerVars.setColumnHidden(1, True)
+        self.uniformBlocks.setColumnHidden(3, True)
         self.samplerVars.setColumnHidden(2, True)
-        self.vertexAttribs.setColumnHidden(1, True)
+        self.samplerVars.setColumnHidden(3, True)
         self.vertexAttribs.setColumnHidden(2, True)
+        self.vertexAttribs.setColumnHidden(3, True)
 
         vertexTab = TabWidget()
         vertexTab.addTab(self.vertexMacros, "Macros")
@@ -182,10 +182,9 @@ class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("SharcEditor v0.1 - (C) 2019 AboodXD")
+        self.setWindowTitle("SharcEditor v0.2 - (C) 2019-2023 AboodXD")
 
         self.sharc = Sharc()
-        self.numPrograms = 0
         self.codeFiles = []
 
         fileLabel = QtWidgets.QLabel()
@@ -214,8 +213,8 @@ class MainWindow(QtWidgets.QWidget):
         QtWidgets.QTreeWidgetItem(self.treeWidget)
         QtWidgets.QTreeWidgetItem(self.treeWidget)
         self.treeWidget.headerItem().setText(0, "Shader Definition")
-        self.treeWidget.topLevelItem(0).setText(0, "Shading model")
-        self.treeWidget.topLevelItem(1).setText(0, "Source code")
+        self.treeWidget.topLevelItem(0).setText(0, "Shader Program")
+        self.treeWidget.topLevelItem(1).setText(0, "Shader Source")
         self.treeWidget.setSortingEnabled(False)
         self.treeWidget.currentItemChanged.connect(self.currentChanged)
 
@@ -243,21 +242,23 @@ class MainWindow(QtWidgets.QWidget):
         layout.addLayout(fileLayout)
         layout.addLayout(viewLayout)
 
+    def getProgramCount(self):
+        return len(self.sharc.progList)
+
     def closeFile(self):
-        for i in range(self.widgets.count()-1, -1, -1):
-            j = int(i >= self.numPrograms)
-            sip.delete(self.treeWidget.topLevelItem(j).child(i - j*self.numPrograms))
+        for i in range(self.widgets.count() - 1, -1, -1):
+            j = int(i >= self.getProgramCount())
+            sip.delete(self.treeWidget.topLevelItem(j).child(i - j * self.getProgramCount()))
             sip.delete(self.widgets.widget(i))
 
         self.treeWidget.topLevelItem(0).setSelected(False)
         self.treeWidget.topLevelItem(1).setSelected(False)
 
         self.sharc = Sharc()
-        self.numPrograms = 0
         self.codeFiles = []
 
     def openFile(self):
-        file = QtWidgets.QFileDialog.getOpenFileName(None, "Open File", "", "NW4F Shader Archive (*.sharc)")[0]
+        file = QtWidgets.QFileDialog.getOpenFileName(None, "Open File", "", "AGL Resource Shader Archive (*.sharc)")[0]
         if not (file and os.path.isfile(file)):
             return
 
@@ -268,18 +269,17 @@ class MainWindow(QtWidgets.QWidget):
             inb = inf.read()
 
         self.sharc.set(*sharc.load(inb), sharc.header)
-        self.numPrograms = self.sharc.progList.len()
 
         self.codeFiles = []
         for code in self.sharc.codeList:
             self.codeFiles.append(code.name)
 
         for program in self.sharc.progList:
-            model = ShaderModel(self)
-            model.vertexCode.addItems(self.codeFiles)
-            model.fragmentCode.addItems(self.codeFiles)
-            model.vertexCode.setCurrentIndex(program.vtxShIdx)
-            model.fragmentCode.setCurrentIndex(program.frgShIdx)
+            programWidget = ShaderProgram(self)
+            programWidget.vertexCode.addItems(self.codeFiles)
+            programWidget.fragmentCode.addItems(self.codeFiles)
+            programWidget.vertexCode.setCurrentIndex(program.vtxShIdx)
+            programWidget.fragmentCode.setCurrentIndex(program.frgShIdx)
 
             for i, macro in enumerate(program.vertexMacros):
                 nameCell = QtWidgets.QTableWidgetItem()
@@ -288,9 +288,9 @@ class MainWindow(QtWidgets.QWidget):
                 nameCell.setText(macro.name)
                 valueCell.setText(macro.value)
 
-                model.vertexMacros.setItem(i, 0, nameCell)
-                model.vertexMacros.setItem(i, 1, valueCell)
-                model.vertexMacros.setRowCount(i + 2)
+                programWidget.vertexMacros.setItem(i, 0, nameCell)
+                programWidget.vertexMacros.setItem(i, 1, valueCell)
+                programWidget.vertexMacros.setRowCount(i + 2)
 
             for i, macro in enumerate(program.fragmentMacros):
                 nameCell = QtWidgets.QTableWidgetItem()
@@ -299,71 +299,71 @@ class MainWindow(QtWidgets.QWidget):
                 nameCell.setText(macro.name)
                 valueCell.setText(macro.value)
 
-                model.fragmentMacros.setItem(i, 0, nameCell)
-                model.fragmentMacros.setItem(i, 1, valueCell)
-                model.fragmentMacros.setRowCount(i + 2)
+                programWidget.fragmentMacros.setItem(i, 0, nameCell)
+                programWidget.fragmentMacros.setItem(i, 1, valueCell)
+                programWidget.fragmentMacros.setRowCount(i + 2)
 
             for i, sym in enumerate(program.uniformVariables):
                 nameCell = QtWidgets.QTableWidgetItem()
+                idCell = QtWidgets.QTableWidgetItem()
                 defaultValCell = QtWidgets.QTableWidgetItem()
                 offsetCell = QtWidgets.QTableWidgetItem()
-                symCell = QtWidgets.QTableWidgetItem()
 
-                nameCell.setText(sym.variable.name)
-                defaultValCell.setText(str(sym.variable.default))
-                offsetCell.setText(str(sym.variable.offset))
-                symCell.setText(sym.name)
+                nameCell.setText(sym.name)
+                idCell.setText(sym.ID)
+                defaultValCell.setText(str(sym.defaultValue))
+                offsetCell.setText(str(sym.param))
 
-                model.uniformVars.setItem(i, 0, nameCell)
-                model.uniformVars.setItem(i, 1, defaultValCell)
-                model.uniformVars.setItem(i, 2, offsetCell)
-                model.uniformVars.setItem(i, 3, symCell)
-                model.uniformVars.setRowCount(i + 2)
+                programWidget.uniformVars.setItem(i, 0, nameCell)
+                programWidget.uniformVars.setItem(i, 1, idCell)
+                programWidget.uniformVars.setItem(i, 2, defaultValCell)
+                programWidget.uniformVars.setItem(i, 3, offsetCell)
+                programWidget.uniformVars.setRowCount(i + 2)
 
             for i, sym in enumerate(program.uniformBlocks):
                 nameCell = QtWidgets.QTableWidgetItem()
+                idCell = QtWidgets.QTableWidgetItem()
                 defaultValCell = QtWidgets.QTableWidgetItem()
-                symCell = QtWidgets.QTableWidgetItem()
 
-                nameCell.setText(sym.variable.name)
-                defaultValCell.setText(str(sym.variable.default))
-                symCell.setText(sym.name)
+                nameCell.setText(sym.name)
+                idCell.setText(sym.ID)
+                defaultValCell.setText(str(sym.defaultValue))
 
-                model.uniformBlocks.setItem(i, 0, nameCell)
-                model.uniformBlocks.setItem(i, 1, defaultValCell)
-                model.uniformBlocks.setItem(i, 3, symCell)
-                model.uniformBlocks.setRowCount(i + 2)
+                programWidget.uniformBlocks.setItem(i, 0, nameCell)
+                programWidget.uniformBlocks.setItem(i, 1, idCell)
+                programWidget.uniformBlocks.setItem(i, 2, defaultValCell)
+                programWidget.uniformBlocks.setRowCount(i + 2)
 
             for i, sym in enumerate(program.samplerVariables):
                 nameCell = QtWidgets.QTableWidgetItem()
-                symCell = QtWidgets.QTableWidgetItem()
+                idCell = QtWidgets.QTableWidgetItem()
 
-                nameCell.setText(sym.variable.name)
-                symCell.setText(sym.name)
+                nameCell.setText(sym.name)
+                idCell.setText(sym.ID)
 
-                model.samplerVars.setItem(i, 0, nameCell)
-                model.samplerVars.setItem(i, 3, symCell)
-                model.samplerVars.setRowCount(i + 2)
+                programWidget.samplerVars.setItem(i, 0, nameCell)
+                programWidget.samplerVars.setItem(i, 1, idCell)
+                programWidget.samplerVars.setRowCount(i + 2)
 
             for i, sym in enumerate(program.attribVariables):
                 nameCell = QtWidgets.QTableWidgetItem()
-                symCell = QtWidgets.QTableWidgetItem()
+                idCell = QtWidgets.QTableWidgetItem()
 
-                nameCell.setText(sym.variable.name)
-                symCell.setText(sym.name)
+                nameCell.setText(sym.name)
+                idCell.setText(sym.ID)
 
-                model.vertexAttribs.setItem(i, 0, nameCell)
-                model.vertexAttribs.setItem(i, 3, symCell)
-                model.vertexAttribs.setRowCount(i + 2)
+                programWidget.vertexAttribs.setItem(i, 0, nameCell)
+                programWidget.vertexAttribs.setItem(i, 1, idCell)
+                programWidget.vertexAttribs.setRowCount(i + 2)
 
-            modelItem = QtWidgets.QTreeWidgetItem(1)
-            modelItem.setText(0, program.name)
-            self.treeWidget.topLevelItem(0).addChild(modelItem)
-            self.widgets.addWidget(model)
+            programItem = QtWidgets.QTreeWidgetItem(1)
+            programItem.setText(0, program.name)
+            self.treeWidget.topLevelItem(0).addChild(programItem)
+            self.widgets.addWidget(programWidget)
 
         for code in self.sharc.codeList:
             source = ShaderSource()
-            highlighter = Highlighter(source.document())
+            Highlighter(source.document())
             source.setPlainText(code.code)
 
             sourceItem = QtWidgets.QTreeWidgetItem(2)
@@ -371,11 +371,11 @@ class MainWindow(QtWidgets.QWidget):
             self.treeWidget.topLevelItem(1).addChild(sourceItem)
             self.widgets.addWidget(source)
 
-        if self.numPrograms:
+        if self.getProgramCount() > 0:
             self.treeWidget.topLevelItem(0).setExpanded(True)
             self.treeWidget.topLevelItem(0).child(0).setSelected(True)
 
-        if self.sharc.codeList.len():
+        if len(self.sharc.codeList):
             self.treeWidget.topLevelItem(1).setExpanded(True)
 
     def add(self):
@@ -388,27 +388,27 @@ class MainWindow(QtWidgets.QWidget):
 
         if index == 0:
             name = QtWidgets.QInputDialog.getText(self, "Choose name",
-                                                  "Choose a name for this shader model (if exists, won't be added):",
+                                                  "Choose a name for this shader program (if exists, won't be added):",
                                                   QtWidgets.QLineEdit.Normal)[0]
 
             if not name:
                 return
 
             for i in range(self.treeWidget.topLevelItem(0).childCount()):
-                modelItem = self.treeWidget.topLevelItem(0).child(i)
-                if modelItem.text(0) == name:
+                programItem = self.treeWidget.topLevelItem(0).child(i)
+                if programItem.text(0) == name:
                     return
 
-            model = ShaderModel(self)
-            model.vertexCode.addItems(self.codeFiles)
-            model.fragmentCode.addItems(self.codeFiles)
-            model.vertexCode.setCurrentIndex(-1)
-            model.fragmentCode.setCurrentIndex(-1)
+            programWidget = ShaderProgram(self)
+            programWidget.vertexCode.addItems(self.codeFiles)
+            programWidget.fragmentCode.addItems(self.codeFiles)
+            programWidget.vertexCode.setCurrentIndex(-1)
+            programWidget.fragmentCode.setCurrentIndex(-1)
 
-            modelItem = QtWidgets.QTreeWidgetItem(1)
-            modelItem.setText(0, name)
-            self.treeWidget.topLevelItem(0).addChild(modelItem)
-            self.widgets.addWidget(model)
+            programItem = QtWidgets.QTreeWidgetItem(1)
+            programItem.setText(0, name)
+            self.treeWidget.topLevelItem(0).addChild(programItem)
+            self.widgets.addWidget(programWidget)
 
         else:
             file = QtWidgets.QFileDialog.getOpenFileName(None, "Open File", "", "GLSL Shader (*.sh *.glsl)")[0]
@@ -421,7 +421,7 @@ class MainWindow(QtWidgets.QWidget):
 
             self.codeFiles.append(name)
 
-            code = sharc.ShaderCode()
+            code = sharc.ShaderSource()
             code.name = name
 
             with open(file, encoding='utf-8') as inf:
@@ -430,7 +430,7 @@ class MainWindow(QtWidgets.QWidget):
             self.sharc.codeList.append(code)
 
             source = ShaderSource()
-            highlighter = Highlighter(source.document())
+            Highlighter(source.document())
             source.setPlainText(code.code)
 
             sourceItem = QtWidgets.QTreeWidgetItem(2)
@@ -438,18 +438,18 @@ class MainWindow(QtWidgets.QWidget):
             self.treeWidget.topLevelItem(1).addChild(sourceItem)
             self.widgets.addWidget(source)
 
-            for i in range(self.numPrograms):
-                model = self.widgets.widget(i)
+            for i in range(self.getProgramCount()):
+                programWidget = self.widgets.widget(i)
 
-                vtxShIdx = model.vertexCode.currentIndex()
-                model.vertexCode.clear()
-                model.vertexCode.addItems(self.codeFiles)
-                model.vertexCode.setCurrentIndex(vtxShIdx)
+                vtxShIdx = programWidget.vertexCode.currentIndex()
+                programWidget.vertexCode.clear()
+                programWidget.vertexCode.addItems(self.codeFiles)
+                programWidget.vertexCode.setCurrentIndex(vtxShIdx)
 
-                frgShIdx = model.fragmentCode.currentIndex()
-                model.fragmentCode.clear()
-                model.fragmentCode.addItems(self.codeFiles)
-                model.fragmentCode.setCurrentIndex(frgShIdx)
+                frgShIdx = programWidget.fragmentCode.currentIndex()
+                programWidget.fragmentCode.clear()
+                programWidget.fragmentCode.addItems(self.codeFiles)
+                programWidget.fragmentCode.setCurrentIndex(frgShIdx)
 
     def remove(self):
         current = self.treeWidget.currentItem()
@@ -461,22 +461,22 @@ class MainWindow(QtWidgets.QWidget):
 
         if index == 0:
             index = self.widgets.currentIndex()
-            if index == -1:
+            if index < 0:
                 return
+
+            self.sharc.progList.pop(index)
 
             sip.delete(self.treeWidget.topLevelItem(0).child(index))
             sip.delete(self.widgets.currentWidget())
 
-            self.numPrograms -= 1
-
         else:
-            index = self.widgets.currentIndex() - self.numPrograms
-            if index == -1:
+            index = self.widgets.currentIndex() - self.getProgramCount()
+            if index < 0:
                 return
 
-            for i in range(self.numPrograms):
-                model = self.widgets.widget(i)
-                if index in (model.vertexCode.currentIndex(), model.fragmentCode.currentIndex()):
+            for i in range(self.getProgramCount()):
+                programWidget = self.widgets.widget(i)
+                if index in (programWidget.vertexCode.currentIndex(), programWidget.fragmentCode.currentIndex()):
                     return
 
             self.codeFiles.pop(index)
@@ -485,110 +485,110 @@ class MainWindow(QtWidgets.QWidget):
             sip.delete(self.treeWidget.topLevelItem(1).child(index))
             sip.delete(self.widgets.currentWidget())
 
-            for i in range(self.numPrograms):
-                model = self.widgets.widget(i)
+            for i in range(self.getProgramCount()):
+                programWidget = self.widgets.widget(i)
 
-                vtxShIdx = model.vertexCode.currentIndex()
-                model.vertexCode.clear()
-                model.vertexCode.addItems(self.codeFiles)
+                vtxShIdx = programWidget.vertexCode.currentIndex()
+                programWidget.vertexCode.clear()
+                programWidget.vertexCode.addItems(self.codeFiles)
                 if vtxShIdx > index:
-                    model.vertexCode.setCurrentIndex(vtxShIdx - 1)
+                    programWidget.vertexCode.setCurrentIndex(vtxShIdx - 1)
 
                 else:
-                    model.vertexCode.setCurrentIndex(vtxShIdx)
+                    programWidget.vertexCode.setCurrentIndex(vtxShIdx)
 
-                frgShIdx = model.fragmentCode.currentIndex()
-                model.fragmentCode.clear()
-                model.fragmentCode.addItems(self.codeFiles)
+                frgShIdx = programWidget.fragmentCode.currentIndex()
+                programWidget.fragmentCode.clear()
+                programWidget.fragmentCode.addItems(self.codeFiles)
                 if frgShIdx > index:
-                    model.fragmentCode.setCurrentIndex(frgShIdx - 1)
+                    programWidget.fragmentCode.setCurrentIndex(frgShIdx - 1)
 
                 else:
-                    model.fragmentCode.setCurrentIndex(frgShIdx)
+                    programWidget.fragmentCode.setCurrentIndex(frgShIdx)
 
     def save(self):
         self.sharc.progList = sharc.List()
-        for i in range(self.numPrograms):
-            model = self.widgets.widget(i)
-            modelItem = self.treeWidget.topLevelItem(0).child(i)
+        for i in range(self.getProgramCount()):
+            programWidget = self.widgets.widget(i)
+            programItem = self.treeWidget.topLevelItem(0).child(i)
 
             program = sharc.ShaderProgram()
-            program.name = modelItem.text(0)
-            program.vtxShIdx = model.vertexCode.currentIndex()
-            program.frgShIdx = model.fragmentCode.currentIndex()
+            program.name = programItem.text(0)
+            program.vtxShIdx = programWidget.vertexCode.currentIndex()
+            program.frgShIdx = programWidget.fragmentCode.currentIndex()
 
-            for r in range(model.vertexMacros.rowCount() - 1):
-                nameCell = model.vertexMacros.item(r, 0)
-                valueCell = model.vertexMacros.item(r, 1)
+            for r in range(programWidget.vertexMacros.rowCount() - 1):
+                nameCell = programWidget.vertexMacros.item(r, 0)
+                valueCell = programWidget.vertexMacros.item(r, 1)
 
-                macro = sharc.ShaderProgram.ShaderMacro()
+                macro = sharc.ShaderMacro()
                 macro.name = nameCell.text()
                 macro.value = valueCell.text()
 
                 program.vertexMacros.append(macro)
 
-            for r in range(model.fragmentMacros.rowCount() - 1):
-                nameCell = model.fragmentMacros.item(r, 0)
-                valueCell = model.fragmentMacros.item(r, 1)
+            for r in range(programWidget.fragmentMacros.rowCount() - 1):
+                nameCell = programWidget.fragmentMacros.item(r, 0)
+                valueCell = programWidget.fragmentMacros.item(r, 1)
 
-                macro = sharc.ShaderProgram.ShaderMacro()
+                macro = sharc.ShaderMacro()
                 macro.name = nameCell.text()
                 macro.value = valueCell.text()
 
                 program.fragmentMacros.append(macro)
 
-            for r in range(model.uniformVars.rowCount() - 1):
-                nameCell = model.uniformVars.item(r, 0)
-                defaultValCell = model.uniformVars.item(r, 1)
-                offsetCell = model.uniformVars.item(r, 2)
-                symCell = model.uniformVars.item(r, 3)
+            for r in range(programWidget.uniformVars.rowCount() - 1):
+                nameCell = programWidget.uniformVars.item(r, 0)
+                idCell = programWidget.uniformVars.item(r, 1)
+                defaultValCell = programWidget.uniformVars.item(r, 2)
+                offsetCell = programWidget.uniformVars.item(r, 3)
 
-                sym = sharc.ShaderProgramBase.ShaderSymbol()
-                sym.variable.name = nameCell.text()
-                sym.variable.default = eval(defaultValCell.text())
-                sym.variable.offset = int(offsetCell.text())
-                sym.name = symCell.text()
-                sym.variationFlags = [True]
+                sym = sharc.ShaderSymbol()
+                sym.name = nameCell.text()
+                sym.ID = idCell.text()
+                sym.defaultValue = eval(defaultValCell.text())
+                sym.param = int(offsetCell.text())
+                sym.validVariations = [True]
 
                 program.uniformVariables.append(sym)
 
-            for r in range(model.uniformBlocks.rowCount() - 1):
-                nameCell = model.uniformBlocks.item(r, 0)
-                defaultValCell = model.uniformBlocks.item(r, 1)
-                symCell = model.uniformBlocks.item(r, 3)
+            for r in range(programWidget.uniformBlocks.rowCount() - 1):
+                nameCell = programWidget.uniformBlocks.item(r, 0)
+                idCell = programWidget.uniformBlocks.item(r, 1)
+                defaultValCell = programWidget.uniformBlocks.item(r, 2)
 
-                sym = sharc.ShaderProgramBase.ShaderSymbol()
-                sym.variable.name = nameCell.text()
-                sym.variable.default = eval(defaultValCell.text())
-                sym.variable.offset = len(sym.variable.default)
-                sym.name = symCell.text()
-                sym.variationFlags = [True]
+                sym = sharc.ShaderSymbol()
+                sym.name = nameCell.text()
+                sym.ID = idCell.text()
+                sym.defaultValue = eval(defaultValCell.text())
+                sym.param = len(sym.defaultValue)
+                sym.validVariations = [True]
 
                 program.uniformBlocks.append(sym)
 
-            for r in range(model.samplerVars.rowCount() - 1):
-                nameCell = model.samplerVars.item(r, 0)
-                symCell = model.samplerVars.item(r, 3)
+            for r in range(programWidget.samplerVars.rowCount() - 1):
+                nameCell = programWidget.samplerVars.item(r, 0)
+                idCell = programWidget.samplerVars.item(r, 1)
 
-                sym = sharc.ShaderProgramBase.ShaderSymbol()
-                sym.variable.name = nameCell.text()
-                sym.variable.default = b''
-                sym.variable.offset = -1
-                sym.name = symCell.text()
-                sym.variationFlags = [True]
+                sym = sharc.ShaderSymbol()
+                sym.name = nameCell.text()
+                sym.ID = idCell.text()
+                sym.defaultValue = b''
+                sym.param = -1
+                sym.validVariations = [True]
 
                 program.samplerVariables.append(sym)
 
-            for r in range(model.vertexAttribs.rowCount() - 1):
-                nameCell = model.vertexAttribs.item(r, 0)
-                symCell = model.vertexAttribs.item(r, 3)
+            for r in range(programWidget.vertexAttribs.rowCount() - 1):
+                nameCell = programWidget.vertexAttribs.item(r, 0)
+                idCell = programWidget.vertexAttribs.item(r, 1)
 
-                sym = sharc.ShaderProgramBase.ShaderSymbol()
-                sym.variable.name = nameCell.text()
-                sym.variable.default = b''
-                sym.variable.offset = -1
-                sym.name = symCell.text()
-                sym.variationFlags = [True]
+                sym = sharc.ShaderSymbol()
+                sym.name = nameCell.text()
+                sym.ID = idCell.text()
+                sym.defaultValue = b''
+                sym.param = -1
+                sym.validVariations = [True]
 
                 program.attribVariables.append(sym)
 
@@ -605,7 +605,7 @@ class MainWindow(QtWidgets.QWidget):
             out.write(sharc.save(self.sharc.progList, self.sharc.codeList))
 
     def saveFileAs(self):
-        file = QtWidgets.QFileDialog.getSaveFileName(None, "Save File As", "", "NW4F Shader Archive (*.sharc)")[0]
+        file = QtWidgets.QFileDialog.getSaveFileName(None, "Save File As", "", "AGL Resource Shader Archive (*.sharc)")[0]
         if not file:
             return
 
@@ -622,7 +622,7 @@ class MainWindow(QtWidgets.QWidget):
             self.widgets.setCurrentIndex(self.treeWidget.topLevelItem(0).indexOfChild(item))
 
         elif type == 2:
-            self.widgets.setCurrentIndex(self.treeWidget.topLevelItem(1).indexOfChild(item) + self.numPrograms)
+            self.widgets.setCurrentIndex(self.treeWidget.topLevelItem(1).indexOfChild(item) + self.getProgramCount())
 
 
 if __name__ == '__main__':
