@@ -23,7 +23,7 @@ class Header:
          endianness,
          nameLen) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
 
-        assert magic == 0x53484141 and endianness == 1 and version == 11
+        assert magic == 0x53484141 and endianness == 1 and version == 12
 
         size = struct.calcsize(self.format)
         pos += size
@@ -260,6 +260,8 @@ class ShaderProgram:
         self.variations = List(self.endianness)
         self.variationDefaults = List(self.endianness)
 
+        self.realUniformBlocks = List(self.endianness)
+
         self.uniformVariables = List(self.endianness)
         self.uniformBlocks = List(self.endianness)
         self.samplerVariables = List(self.endianness)
@@ -299,6 +301,9 @@ class ShaderProgram:
 
         self.variationDefaults.load(data, pos, ShaderVariation)
         pos += self.variationDefaults.size
+
+        self.realUniformBlocks.load(data, pos, ShaderUniformBlock)
+        pos += self.realUniformBlocks.size
 
         self.uniformVariables.load(data, pos, ShaderSymbol)
         pos += self.uniformVariables.size
@@ -364,6 +369,8 @@ class ShaderProgram:
         variations = self.variations.save()
         variationDefaults = self.variationDefaults.save()
 
+        realUniformBlocks = self.realUniformBlocks.save()
+
         uniformVariables = self.uniformVariables.save()
         uniformBlocks = self.uniformBlocks.save()
         samplerVariables = self.samplerVariables.save()
@@ -377,6 +384,7 @@ class ShaderProgram:
             self.geometryMacros.size +
             self.variations.size +
             self.variationDefaults.size +
+            self.realUniformBlocks.size +
             self.uniformVariables.size +
             self.uniformBlocks.size +
             self.samplerVariables.size +
@@ -398,6 +406,7 @@ class ShaderProgram:
             geometryMacros,
             variations,
             variationDefaults,
+            realUniformBlocks,
             uniformVariables,
             uniformBlocks,
             samplerVariables,
@@ -468,6 +477,133 @@ class ShaderSource:
     def export(self, path):
         with open(os.path.join(path, self.name), 'wb+') as out:
             out.write(self.code.encode('utf-8'))
+
+
+class ShaderUniformBlock:
+    def __init__(self, endianness='<'):
+        self.format = '3I'
+        self.endianness = endianness
+
+        self.size = 0
+
+        self.location = 0
+        self.name = ''
+
+        self.uniforms = List(self.endianness)
+
+    def __str__(self):
+        return 'Shader Uniform Block'
+
+    def load(self, data, pos):
+        (self.size,
+         self.location,
+         nameLen) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+        pos += struct.calcsize(self.format)
+
+        self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
+        pos += nameLen
+
+        print("Shader Uniform Block name: '%s', location: %d" % (self.name, self.location))
+
+        self.uniforms.load(data, pos, ShaderUniform)
+        pos += self.uniforms.size
+
+    def save(self):
+        name = (self.name + '\0').encode('utf-8')
+        nameLen = len(name)
+
+        uniforms = self.uniforms.save()
+
+        self.size = struct.calcsize(self.format) + nameLen + self.uniforms.size
+
+        return b''.join([
+            struct.pack(
+                '%s%s' % (self.endianness, self.format),
+                self.size,
+                self.location,
+                nameLen,
+            ),
+            name,
+            uniforms,
+        ])
+
+
+class ShaderUniform:
+    def __init__(self, endianness='<'):
+        self.format = '3I'
+        self.endianness = endianness
+
+        self.size = 0
+
+        self.offset = 0
+        self.name = ''
+
+    def __str__(self):
+        return 'Shader Uniform'
+
+    def load(self, data, pos):
+        (self.size,
+         self.offset,
+         nameLen) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+        pos += struct.calcsize(self.format)
+
+        self.name = data[pos:pos + nameLen].decode('utf-8').rstrip('\0')
+        pos += nameLen
+
+        print("Shader Uniform name: '%s', offset: %d" % (self.name, self.offset))
+
+    def save(self):
+        name = (self.name + '\0').encode('utf-8')
+        nameLen = len(name)
+
+        self.size = struct.calcsize(self.format) + nameLen
+
+        return b''.join([
+            struct.pack(
+                '%s%s' % (self.endianness, self.format),
+                self.size,
+                self.offset,
+                nameLen,
+            ),
+            name,
+        ])
+
+
+class ShaderUnknown2:
+    def __init__(self, endianness='<'):
+        self.format = '4I'
+        self.endianness = endianness
+
+        self.size = 0
+
+        self.values = []
+        self.remainingData = b''
+
+    def __str__(self):
+        return 'Shader Unknown 2'
+
+    def load(self, data, pos):
+        (self.size,
+         *self.values) = struct.unpack_from('%s%s' % (self.endianness, self.format), data, pos)
+        pos += struct.calcsize(self.format)
+
+        remainingSize = self.size - struct.calcsize(self.format)
+        self.remainingData = data[pos:pos + remainingSize]
+
+        print("Shader Unknown 2 values:", *self.values)
+        print("Shader Unknown 2 remaining data:", self.remainingData)
+
+    def save(self):
+        self.size = struct.calcsize(self.format) + len(self.remainingData)
+
+        return b''.join([
+            struct.pack(
+                '%s%s' % (self.endianness, self.format),
+                self.size,
+                *self.values
+            ),
+            self.remainingData
+        ])
 
 
 class List:
@@ -545,10 +681,15 @@ def load(inb, pos=0):
 
     pos += codeList.size
 
-    return progList, codeList
+    unknList = List()
+    unknList.load(inb, pos, ShaderUnknown2)
+
+    pos += unknList.size
+
+    return progList, codeList, unknList
 
 
-def save(progList, codeList):
+def save(progList, codeList, unknList):
     outBuffer = bytearray(b''.join([
         header.save(),
         progList.save(),

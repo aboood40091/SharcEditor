@@ -14,11 +14,13 @@ class Sharc:
         self.header = sharc.header = sharc.Header()
         self.progList = sharc.List()
         self.codeList = sharc.List()
+        self.unknList = sharc.List()
 
-    def set(self, progList, codeList, header):
+    def set(self, progList, codeList, unknList, header):
         self.header = header
         self.progList = progList
         self.codeList = codeList
+        self.unknList = unknList
 
 
 class TableWidget(QtWidgets.QTableWidget):
@@ -602,7 +604,7 @@ class MainWindow(QtWidgets.QWidget):
         self.save()
 
         with open(file, "wb") as out:
-            out.write(sharc.save(self.sharc.progList, self.sharc.codeList))
+            out.write(sharc.save(self.sharc.progList, self.sharc.codeList, self.sharc.unknList))
 
     def saveFileAs(self):
         file = QtWidgets.QFileDialog.getSaveFileName(None, "Save File As", "", "AGL Resource Shader Archive (*.sharc)")[0]
@@ -614,7 +616,7 @@ class MainWindow(QtWidgets.QWidget):
         self.fileLineEdit.setText(file)
 
         with open(file, "wb") as out:
-            out.write(sharc.save(self.sharc.progList, self.sharc.codeList))
+            out.write(sharc.save(self.sharc.progList, self.sharc.codeList, self.sharc.unknList))
 
     def currentChanged(self, item):
         type = item.type()
