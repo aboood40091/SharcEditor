@@ -19,6 +19,7 @@ class Sharc:
         self.header = header
         self.progList = progList
         self.codeList = codeList
+        self.programCount = len(progList)
 
 
 class TableWidget(QtWidgets.QTableWidget):
@@ -243,7 +244,7 @@ class MainWindow(QtWidgets.QWidget):
         layout.addLayout(viewLayout)
 
     def getProgramCount(self):
-        return len(self.sharc.progList)
+        return self.sharc.programCount
 
     def closeFile(self):
         for i in range(self.widgets.count() - 1, -1, -1):
@@ -409,6 +410,7 @@ class MainWindow(QtWidgets.QWidget):
             programItem.setText(0, name)
             self.treeWidget.topLevelItem(0).addChild(programItem)
             self.widgets.addWidget(programWidget)
+            self.sharc.programCount += 1
 
         else:
             file = QtWidgets.QFileDialog.getOpenFileName(None, "Open File", "", "GLSL Shader (*.sh *.glsl)")[0]
@@ -464,7 +466,8 @@ class MainWindow(QtWidgets.QWidget):
             if index < 0:
                 return
 
-            self.sharc.progList.pop(index)
+            # self.sharc.progList.pop(index)
+            self.sharc.programCount -= 1
 
             sip.delete(self.treeWidget.topLevelItem(0).child(index))
             sip.delete(self.widgets.currentWidget())
