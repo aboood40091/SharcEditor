@@ -105,6 +105,8 @@ class ShaderSource(QtWidgets.QTextEdit):
         self.setFont(font)
         self.setReadOnly(True)
 
+        self._highlighter = Highlighter(self.document())
+
 
 class ShaderSourceTab(QtWidgets.QWidget):
     def __init__(self, parent: MainWindow, type: int) -> None:
@@ -124,7 +126,6 @@ class ShaderSourceTab(QtWidgets.QWidget):
         fileLayout.addWidget(self._fileComboBox)
 
         self._editor: ShaderSource = ShaderSource()
-        Highlighter(self._editor.document())
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(fileLayout)
@@ -378,7 +379,6 @@ class MainWindow(QtWidgets.QWidget):
 
         for code in self.sharc.codeList:
             source = ShaderSource()
-            Highlighter(source.document())
             source.setPlainText(code.code)
 
             sourceItem = QtWidgets.QTreeWidgetItem(2)
@@ -446,7 +446,6 @@ class MainWindow(QtWidgets.QWidget):
             self.sharc.codeList.append(code)
 
             source = ShaderSource()
-            Highlighter(source.document())
             source.setPlainText(code.code)
 
             sourceItem = QtWidgets.QTreeWidgetItem(2)

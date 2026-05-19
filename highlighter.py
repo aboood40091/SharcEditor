@@ -55,7 +55,7 @@ class Highlighter(QtGui.QSyntaxHighlighter):
         self.multiLineCommentFormat = QtGui.QTextCharFormat()
         self.multiLineCommentFormat.setForeground(Qt.red)
 
-        self.commentStartExpression = QtCore.QRegExp(r'/\*')
+        self.commentStartExpression = QtCore.QRegularExpression(r'/\*')
         self.commentEndExpression = QtCore.QRegularExpression(r'\*/')
 
     def highlightBlock(self, text):
@@ -68,7 +68,8 @@ class Highlighter(QtGui.QSyntaxHighlighter):
         self.setCurrentBlockState(0)
         startIndex = 0
         if self.previousBlockState() != 1:
-            startIndex = self.commentStartExpression.indexIn(text)
+            startMatch = self.commentStartExpression.match(text)
+            startIndex = startMatch.capturedStart() if startMatch.hasMatch() else -1
 
         while startIndex >= 0:
             match = self.commentEndExpression.match(text, startIndex)
@@ -82,4 +83,5 @@ class Highlighter(QtGui.QSyntaxHighlighter):
                 commentLength = endIndex - startIndex + match.capturedLength()
 
             self.setFormat(startIndex, commentLength, self.multiLineCommentFormat)
-            startIndex = self.commentStartExpression.indexIn(text, startIndex + commentLength)
+            nextMatch = self.commentStartExpression.match(text, startIndex + commentLength)
+            startIndex = nextMatch.capturedStart() if nextMatch.hasMatch() else -1
